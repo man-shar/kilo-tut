@@ -1,0 +1,28 @@
+/home/manas/projects/tuts/text-editor/kilo.c: In function ‘disableRawMode’:
+/home/manas/projects/tuts/text-editor/kilo.c:16:5: warning: implicit declaration of function ‘die’ [-Wimplicit-function-declaration]
+     die("tcsetattr");
+     ^
+/home/manas/projects/tuts/text-editor/kilo.c: In function ‘enableRawMode’:
+/home/manas/projects/tuts/text-editor/kilo.c:22:3: warning: implicit declaration of function ‘atexit’ [-Wimplicit-function-declaration]
+   atexit(disableRawMode);
+   ^
+/home/manas/projects/tuts/text-editor/kilo.c: At top level:
+/home/manas/projects/tuts/text-editor/kilo.c:35:6: warning: conflicting types for ‘die’
+ void die(const char *s) {
+      ^
+/home/manas/projects/tuts/text-editor/kilo.c:16:5: note: previous implicit declaration of ‘die’ was here
+     die("tcsetattr");
+     ^
+/home/manas/projects/tuts/text-editor/kilo.c: In function ‘die’:
+/home/manas/projects/tuts/text-editor/kilo.c:37:3: warning: implicit declaration of function ‘exit’ [-Wimplicit-function-declaration]
+   exit(1);
+   ^
+/home/manas/projects/tuts/text-editor/kilo.c:37:3: warning: incompatible implicit declaration of built-in function ‘exit’
+/home/manas/projects/tuts/text-editor/kilo.c:37:3: note: include ‘<stdlib.h>’ or provide a declaration of ‘exit’
+/home/manas/projects/tuts/text-editor/kilo.c: In function ‘main’:
+/home/manas/projects/tuts/text-editor/kilo.c:46:28: error: expected ‘)’ before ‘break’
+    if (c == CTRL_KEY('q')) break;
+                            ^
+/home/manas/projects/tuts/text-editor/kilo.c:52:2: error: expected expression before ‘}’ token
+  }
+  ^

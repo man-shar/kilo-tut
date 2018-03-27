@@ -6,16 +6,25 @@
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <string.h>
 
 /* defines */
 #define CTRL_KEY(k) ((k) & 0x1f)
+#define ABUF_INIT {NULL, 0}
+#define KILO_VERSION "0.0.1"
 
-/* globals */
+
+/* structs */
 
 struct editorConfig {
   int screenrows;
   int screencols;
   struct termios orig_termios;
+};
+
+struct abuf {
+  char *b;
+  int len;
 };
 
 struct editorConfig E;
@@ -99,25 +108,71 @@ int getWindowSize(int *rows, int *cols) {
   }
 }
 
+/* buffer */
+
+void abAppend(struct abuf *ab, const char *s, int len) {
+  char *new = realloc(ab->b, ab->len + len);
+
+  if(new == NULL) return;
+  memcpy(&new[ab->len], s, len);
+  ab->b = new;
+  ab->len += len;
+}
+
+void abFree(struct abuf *ab) {
+  free(ab->b);
+}
+
+
 /* output */
 
-void editorDrawRows() {
+void editorDrawRows(struct abuf *ab) {
   for (int i = 0; i < E.screenrows; ++i) {
-    write(STDOUT_FILENO, "~", 1);
+    // write(STDOUT_FILENO, "~", 1);
 
+    if (i == E.screenrows / 3) {
+      char welcome[80];
+      int welcomelen = snprintf(welcome, 80, "Kilo editor --version %s", KILO_VERSION);
+
+      if(welcomelen > E.screencols) welcomelen = E.screencols;
+
+      int offset = (E.screencols - welcomelen) / 2;
+      char offsetstr[offset];
+      offset = snprintf(offsetstr, offset, "\x1B[31m\x1b[%dC", offset);
+
+      abAppend(ab, offsetstr, offset);
+      abAppend(ab, welcome, welcomelen);
+      abAppend(ab, "\x1B[0m", 4);
+    } else {
+      abAppend(ab, "~", 1);
+    }
+
+    // erase line to right of cursor
+    abAppend(ab, "\x1b[K0", 3);
     if (i < E.screenrows - 1) {
-      write(STDOUT_FILENO, "\r\n", 2);
+      // write(STDOUT_FILENO, "\r\n", 2);
+      abAppend(ab, "\r\n", 2);
     }
   }
 }
 
 void editorRefreshScreen() {
-  write(STDOUT_FILENO, "\x1b[2J", 4);
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  struct abuf ab = ABUF_INIT;
 
-  editorDrawRows();
+  // write(STDOUT_FILENO, "\x1b[2J", 4);
+  // write(STDOUT_FILENO, "\x1b[H", 3);
+  abAppend(&ab, "\x1b[?25h", 5);
+  // abAppend(&ab, "\x1b[2J", 4);
+  abAppend(&ab, "\x1b[H", 3);
 
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  editorDrawRows(&ab);
+
+  // write(STDOUT_FILENO, "\x1b[H", 3);
+  abAppend(&ab, "\x1b[H", 3);
+  abAppend(&ab, "\x1b[?25l", 5);
+
+  write(STDOUT_FILENO, ab.b, ab.len);
+  abFree(&ab);
 }
 
 /* input */

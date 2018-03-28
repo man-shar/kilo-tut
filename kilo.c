@@ -18,8 +18,11 @@ enum editorKey {
   ARROW_RIGHT,
   ARROW_UP,
   ARROW_DOWN,
-  END,
-  HOME
+  END_KEY,
+  HOME_KEY,
+  PAGE_UP,
+  PAGE_DOWN,
+  DEL_KEY
 };
 
 
@@ -89,18 +92,46 @@ int editorReadKey() {
     if(read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
 
     if(seq[0] == '[') {
+      if (seq[1] <= 9 && seq[1] >= 0) {
+        if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
+
+        if (seq[2] == '~')
+        {
+          switch (seq[1]) {
+            case '1': return HOME_KEY;
+            case '7': return HOME_KEY;
+            case '5': return PAGE_UP;
+            case '6': return PAGE_DOWN;
+            case '4': return END_KEY;
+            case '8': return END_KEY;
+            case '3': return DEL_KEY;
+          }
+        }
+      }
+
+      else {
+        switch (seq[1]) {
+          case 'A': return ARROW_UP;
+          case 'B': return ARROW_DOWN;
+          case 'C': return ARROW_RIGHT;
+          case 'D': return ARROW_LEFT;
+          case 'H': return HOME_KEY;
+          case 'F': return END_KEY;
+        }
+      }
+    }
+
+    else if (seq[0] == 'O') {
       switch (seq[1]) {
-        case 'A': return ARROW_UP;
-        case 'B': return ARROW_DOWN;
-        case 'C': return ARROW_RIGHT;
-        case 'D': return ARROW_LEFT;
-        case 'H': return HOME;
-        case 'F': return END;
+        case 'H': return HOME_KEY;
+        case 'F': return END_KEY;
       }
     }
 
     return '\x1b';
-  } else {
+  }
+
+  else {
     return c;
   }
 }
@@ -133,7 +164,9 @@ int getWindowSize(int *rows, int *cols) {
     if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
 
     return getCursorPosition(rows, cols);
-  } else {
+  }
+
+  else {
     *cols = ws.ws_col;
     *rows = ws.ws_row;
     return 0;
@@ -185,7 +218,9 @@ void editorDrawRows(struct abuf *ab) {
       abAppend(ab, welcome, welcomelen);
       // back to default colour
       abAppend(ab, "\x1b[0m", 4);
-    } else {
+    }
+
+    else {
       abAppend(ab, "~", 1);
     }
 
@@ -243,10 +278,10 @@ void editorMoveCursor(int key) {
         E.cy++;
       }
       break;
-    case HOME:
+    case HOME_KEY:
       E.cx = 0;
       break;
-    case END:    
+    case END_KEY:    
       E.cx = E.screencols - 1;
       break;
   }
@@ -266,6 +301,8 @@ void editorProcessKeyPress() {
     case ARROW_LEFT:
     case ARROW_DOWN:
     case ARROW_RIGHT:
+    case HOME_KEY:
+    case END_KEY:
       editorMoveCursor(c);
       break;
   }

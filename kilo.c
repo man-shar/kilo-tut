@@ -6,12 +6,17 @@
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <string.h>
+
 
 /* defines */
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define ABUF_INIT {NULL, 0}
 #define KILO_VERSION "0.0.1"
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
 
 enum editorKey {
   ARROW_LEFT = 1000,
@@ -28,11 +33,18 @@ enum editorKey {
 
 /* structs */
 
+typedef struct {
+  int size;
+  char *chars;
+} erow;
+
 struct editorConfig {
   int cx;
   int cy;
   int screenrows;
   int screencols;
+  int numrows;
+  erow *row;
   struct termios orig_termios;
 };
 
@@ -194,34 +206,41 @@ void abFree(struct abuf *ab) {
 void editorDrawRows(struct abuf *ab) {
   for (int i = 0; i < E.screenrows; ++i) {
 
-    if (i == E.screenrows / 3) {
-      char welcome[80];
-      int welcomelen = snprintf(welcome, 80, "Kilo editor --version %s", KILO_VERSION);
+    if (i >= E.numrows) {
+      if (E.numrows == 0 && i == E.screenrows / 3) {
+        char welcome[80];
+        int welcomelen = snprintf(welcome, 80, "Kilo editor --version %s", KILO_VERSION);
 
-      if (welcomelen > E.screencols) welcomelen = E.screencols;
-      int offset = (E.screencols - welcomelen) / 2;
+        if (welcomelen > E.screencols) welcomelen = E.screencols;
+        int offset = (E.screencols - welcomelen) / 2;
 
-      /* CANT SIMPLY MOVE CURSOR HERE AS IT INTERFERES WITH CURSOR MOVEMENT VIA KEYS
-      char offsetstr[offset];
-      offset = snprintf(offsetstr, offset, "\x1b[%dC", offset);
-      */
+        /* CANT SIMPLY MOVE CURSOR HERE AS IT INTERFERES WITH CURSOR MOVEMENT VIA KEYS
+        char offsetstr[offset];
+        offset = snprintf(offsetstr, offset, "\x1b[%dC", offset);
+        */
 
-      if (offset) {
-        abAppend(ab, "~", 1);
-        offset--;
+        if (offset) {
+          abAppend(ab, "~", 1);
+          offset--;
+        }
+        while (offset--) abAppend(ab, " ", 1);
+
+        // red colour
+        abAppend(ab, "\x1b[31m", 5);
+        // append welcome string
+        abAppend(ab, welcome, welcomelen);
+        // back to default colour
+        abAppend(ab, "\x1b[0m", 4);
       }
-      while (offset--) abAppend(ab, " ", 1);
 
-      // red colour
-      abAppend(ab, "\x1b[31m", 5);
-      // append welcome string
-      abAppend(ab, welcome, welcomelen);
-      // back to default colour
-      abAppend(ab, "\x1b[0m", 4);
-    }
-
-    else {
-      abAppend(ab, "~", 1);
+      else {
+        abAppend(ab, "~", 1);
+      }
+    } else {
+      // append from file.
+      int len = E.row[i].size;
+      if(len > E.screencols) len = E.screencols;
+      abAppend(ab, E.row[i].chars, len);
     }
 
     // erase line to right of cursor
@@ -308,18 +327,59 @@ void editorProcessKeyPress() {
   }
 }
 
+/* row operations */
+
+void editorAppendRow(char *s, size_t len) {
+  E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+
+  int row_number = E.numrows;
+  E.row[row_number].size = len;
+  E.row[row_number].chars = malloc(len + 1);
+  memcpy(E.row[row_number].chars, s, len);
+  E.row[row_number].chars[len + 1] = '\0';
+  E.numrows++;
+}
+
+
+/* file i/o */
+
+void editorOpen(char *filename) {
+  FILE *fp = fopen(filename, "r");
+  if(!fp) die ("fopen");
+
+  char *line = NULL;
+  size_t linecap = 0;
+  ssize_t linelen;
+
+  while ((linelen = getline(&line, &linecap, fp)) != -1) {
+    // strip off carriage returns as we are storing these in erow anyways.
+    while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
+      linelen--;
+
+    editorAppendRow(line, linelen);
+  }
+  free(line);
+  fclose(fp);
+}
+
 /* init */
 
 void initEditor() {
   E.cx = 0;
   E.cy = 0;
+  E.numrows = 0;
+  E.row = NULL;
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
 }
 
-int main() {
+int main(int argc, char **argv) { 
   enableRawMode();
   initEditor();
+
+  if(argc >= 2) {
+  editorOpen(argv[1]);
+  }
 
   while(1) {
     editorRefreshScreen();

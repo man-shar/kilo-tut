@@ -39,12 +39,23 @@ typedef struct {
 } erow;
 
 struct editorConfig {
+  // contain cursor positions **relative to file**. so essentially:
+  // cy = cursor y position relative to terminal window + rowoff
+  // cx = cursor x position relative to terminal window + coloff
   int cx;
   int cy;
+  // contain terminal dimensions
   int screenrows;
   int screencols;
+  // contains rows in the file
   int numrows;
+  // owoff refers to what’s at the top of the screen in the file.
+  int rowoff;
+  // coloff refers to what's at the left of the screen in the file.
+  int coloff;
+  // points to the stored file
   erow *row;
+  // original terminal attributes to restore atexit
   struct termios orig_termios;
 };
 
@@ -205,8 +216,10 @@ void abFree(struct abuf *ab) {
 
 void editorDrawRows(struct abuf *ab) {
   for (int i = 0; i < E.screenrows; ++i) {
+    // row of the file the user is currently scrolled to.
+    int filerow = i + E.rowoff;
 
-    if (i >= E.numrows) {
+    if (filerow >= E.numrows) {
       if (E.numrows == 0 && i == E.screenrows / 3) {
         char welcome[80];
         int welcomelen = snprintf(welcome, 80, "Kilo editor --version %s", KILO_VERSION);
@@ -238,9 +251,10 @@ void editorDrawRows(struct abuf *ab) {
       }
     } else {
       // append from file.
-      int len = E.row[i].size;
+      int len = E.row[filerow].size - E.coloff;
+      if (len < 0) len = 0;
       if(len > E.screencols) len = E.screencols;
-      abAppend(ab, E.row[i].chars, len);
+      abAppend(ab, &E.row[filerow].chars[E.coloff], len);
     }
 
     // erase line to right of cursor
@@ -251,7 +265,35 @@ void editorDrawRows(struct abuf *ab) {
   }
 }
 
+// to find where the user wants to be in the file. and save that to rowoff.
+void editorScroll() {
+  // vertical
+  if (E.cy < E.rowoff) {
+    E.rowoff = E.cy;
+  }
+
+  // horizontal
+  if (E.cx < E.coloff) {
+    E.coloff = E.cx;
+  }
+
+  // as we said, cy now saves cursor positions **relative to file**. so essentially:
+  // cy = cursor y position relative to terminal window + rowoff
+  if (E.cy >= E.rowoff + E.screenrows) {
+    E.rowoff = E.cy - E.screenrows + 1;
+  }
+
+  // as we said, cx now saves cursor positions **relative to file**. so essentially:
+  // cx = cursor x position relative to terminal window + coloff
+  if (E.cx >= E.coloff + E.screencols) {
+    E.coloff = E.cx - E.screencols + 1;
+  }
+}
+
 void editorRefreshScreen() {
+  // since editorRefreshScreen is called before processing keypress, we can insert logic of 
+  editorScroll();
+
   struct abuf ab = ABUF_INIT;
 
   // hide cursor
@@ -263,7 +305,7 @@ void editorRefreshScreen() {
 
   // send cursor to cx and cy
   char movecursor[32];
-  snprintf(movecursor, sizeof(movecursor), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+  snprintf(movecursor, sizeof(movecursor), "\x1b[%d;%dH", (E.cy - E.rowoff + 1), (E.cx - E.coloff + 1));
   abAppend(&ab, movecursor, strlen(movecursor));
 
   // show cursor
@@ -276,15 +318,27 @@ void editorRefreshScreen() {
 /* input */
 
 void editorMoveCursor(int key) {
+  // to check right limit, get the current line.
+  erow *row = (E.cy > E.numrows) ? NULL : &E.row[E.cy];
+  int rowlen = row ? row->size : 0;
+
   switch (key) {
     case ARROW_LEFT:
       if (E.cx != 0) {
         E.cx--;
+      } else if (E.cy > 0){
+        // move to previous row
+        E.cy--;
+        E.cx = E.row[E.cy].size;
       }
       break;
     case ARROW_RIGHT:
-      if (E.cx != E.screencols - 1) {
+      // now we test whether the cursor is past the end of the current line, if so, we limit it to one character past it.
+      if (row && E.cx < row->size) {
         E.cx++;
+      } else if (row && E.cx == row->size) {
+        E.cy++;
+        E.cx = 0;
       }
       break;
     case ARROW_UP:
@@ -293,7 +347,8 @@ void editorMoveCursor(int key) {
       }
       break;
     case ARROW_DOWN:
-      if (E.cy != E.screenrows - 1) {
+      // if y position is less than number of rows in file: scroll.
+      if (E.cy < E.numrows) {
         E.cy++;
       }
       break;
@@ -301,8 +356,18 @@ void editorMoveCursor(int key) {
       E.cx = 0;
       break;
     case END_KEY:    
-      E.cx = E.screencols - 1;
+      E.cx = rowlen;
       break;
+  }
+
+  // check if the user's cursor is past the end of a line.
+  // this can still happen if the user was on a long line with a short line below it, and presses arrow down when beyond the shorter line.
+  // get new row
+  row = (E.cy >E.numrows) ? NULL : &E.row[E.cy];
+  rowlen = row ? row->size : 0;
+  // check if cursor is past line.
+  if (E.cx > rowlen) {
+    E.cx = rowlen;
   }
 }
 
@@ -369,6 +434,8 @@ void initEditor() {
   E.cy = 0;
   E.numrows = 0;
   E.row = NULL;
+  E.rowoff = 0;
+  E.coloff = 0;
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
 }
@@ -378,7 +445,7 @@ int main(int argc, char **argv) {
   initEditor();
 
   if(argc >= 2) {
-  editorOpen(argv[1]);
+    editorOpen(argv[1]);
   }
 
   while(1) {

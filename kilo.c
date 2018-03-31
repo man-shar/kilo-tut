@@ -17,6 +17,7 @@
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #define _GNU_SOURCE
+#define TAB_SIZE 2
 
 enum editorKey {
   ARROW_LEFT = 1000,
@@ -35,6 +36,11 @@ enum editorKey {
 
 typedef struct {
   int size;
+  // contains final processed (eg: tabs to spaces) text to render
+  char *render;
+  // contains size of render
+  int rsize;
+  // contains the text from file.
   char *chars;
 } erow;
 
@@ -44,6 +50,9 @@ struct editorConfig {
   // cx = cursor x position relative to terminal window + coloff
   int cx;
   int cy;
+  // contain cursor positions **relative to file** after processing (eg: tabs to spaces):
+  // rx = cursor x position relative to terminal window + coloff
+  int rx;
   // contain terminal dimensions
   int screenrows;
   int screencols;
@@ -214,6 +223,34 @@ void abFree(struct abuf *ab) {
 
 /* output */
 
+void editorUpdateRows(erow *row) {
+  free(row->render);
+  int tabs = 0;
+  int i;
+
+  for (i = 0; i < row->size; ++i)
+  {
+    if (row->chars[i] == '\t')
+      tabs++;
+  }
+
+  row->render = malloc(row->size + tabs * (TAB_SIZE - 1) + 1);
+
+  int copied = 0;
+  for (i = 0; i < row->size; ++i)
+  {
+    if (row->chars[i] == '\t') {
+      int j = TAB_SIZE;
+      while(j--) row->render[copied++] = ' ';
+    } else {
+      row->render[copied++] = row->chars[i];
+    }
+  }
+
+  row->render[copied] = '\0';
+  row->rsize = copied;
+}
+
 void editorDrawRows(struct abuf *ab) {
   for (int i = 0; i < E.screenrows; ++i) {
     // row of the file the user is currently scrolled to.
@@ -251,10 +288,10 @@ void editorDrawRows(struct abuf *ab) {
       }
     } else {
       // append from file.
-      int len = E.row[filerow].size - E.coloff;
+      int len = E.row[filerow].rsize - E.coloff;
       if (len < 0) len = 0;
       if(len > E.screencols) len = E.screencols;
-      abAppend(ab, &E.row[filerow].chars[E.coloff], len);
+      abAppend(ab, &E.row[filerow].render[E.coloff], len);
     }
 
     // erase line to right of cursor
@@ -265,16 +302,35 @@ void editorDrawRows(struct abuf *ab) {
   }
 }
 
+int editorRowCxToRx (erow *row, int cx) {
+  int rx = 0;
+
+  for (int i = 0; i < cx; ++i)
+  {
+    if(row->chars[i] == '\t') {
+      rx += TAB_SIZE - 1;
+    }
+    rx++;
+  }
+  return rx;
+}
+
 // to find where the user wants to be in the file. and save that to rowoff.
 void editorScroll() {
+  E.rx = 0;
+  // find location of cursor, considering tabs, etc.
+  if(E.cy < E.numrows) {
+    E.rx = editorRowCxToRx(&E.row[E.cy], E.cx);
+  }
+
   // vertical
   if (E.cy < E.rowoff) {
     E.rowoff = E.cy;
   }
 
   // horizontal
-  if (E.cx < E.coloff) {
-    E.coloff = E.cx;
+  if (E.rx < E.coloff) {
+    E.coloff = E.rx;
   }
 
   // as we said, cy now saves cursor positions **relative to file**. so essentially:
@@ -283,10 +339,10 @@ void editorScroll() {
     E.rowoff = E.cy - E.screenrows + 1;
   }
 
-  // as we said, cx now saves cursor positions **relative to file**. so essentially:
-  // cx = cursor x position relative to terminal window + coloff
-  if (E.cx >= E.coloff + E.screencols) {
-    E.coloff = E.cx - E.screencols + 1;
+  // as we said, rx now saves cursor positions **relative to file**. so essentially:
+  // rx = cursor x position relative to terminal window + coloff
+  if (E.rx >= E.coloff + E.screencols) {
+    E.coloff = E.rx - E.screencols + 1;
   }
 }
 
@@ -305,7 +361,7 @@ void editorRefreshScreen() {
 
   // send cursor to cx and cy
   char movecursor[32];
-  snprintf(movecursor, sizeof(movecursor), "\x1b[%d;%dH", (E.cy - E.rowoff + 1), (E.cx - E.coloff + 1));
+  snprintf(movecursor, sizeof(movecursor), "\x1b[%d;%dH", (E.cy - E.rowoff + 1), (E.rx - E.coloff + 1));
   abAppend(&ab, movecursor, strlen(movecursor));
 
   // show cursor
@@ -402,6 +458,11 @@ void editorAppendRow(char *s, size_t len) {
   E.row[row_number].chars = malloc(len + 1);
   memcpy(E.row[row_number].chars, s, len);
   E.row[row_number].chars[len + 1] = '\0';
+
+  E.row[row_number].rsize = 0;
+  E.row[row_number].render = NULL;
+  editorUpdateRows(&E.row[row_number]);
+
   E.numrows++;
 }
 
@@ -432,6 +493,7 @@ void editorOpen(char *filename) {
 void initEditor() {
   E.cx = 0;
   E.cy = 0;
+  E.rx= 0;
   E.numrows = 0;
   E.row = NULL;
   E.rowoff = 0;
